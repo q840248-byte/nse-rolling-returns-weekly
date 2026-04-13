@@ -184,8 +184,9 @@ def main():
         if not last_month:
             return m.group(0)
 
-        # Check if already up to date
-        if last_month >= this_month:
+        # Check if already up to date — only skip if last month is AHEAD of current month
+        # (never skip the current month — new trading days may have been added within it)
+        if last_month > this_month:
             print(f"  [{index_name}] ✓ Already current ({last_month})")
             return m.group(0)
 
