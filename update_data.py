@@ -189,9 +189,8 @@ def main():
             print(f"  [{index_name}] ✓ Already current ({last_month})")
             return m.group(0)
 
-        # Fetch from last_month+1 to today
-        last_dt   = datetime.strptime(last_month, "%Y-%m")
-        fetch_from = (last_dt + relativedelta(months=1)).replace(day=1)
+        # Fetch last 6 months (catches any missed months if action failed)
+        fetch_from = (today - relativedelta(months=6)).replace(day=1)
         fetch_to   = today
 
         print(f"  [{index_name}] Fetching {fmt(fetch_from)} → {fmt(fetch_to)}...", end=" ", flush=True)
@@ -205,9 +204,10 @@ def main():
         new_monthly = rows_to_monthly(rows)
         added = 0
         for k, v in sorted(new_monthly.items()):
-            if k > last_month and k <= this_month:
-                data[k] = v
-                added += 1
+            if k <= this_month:
+                if k not in data or data[k] != v:
+                    data[k] = v
+                    added += 1
 
         if added == 0:
             print("no new months")
