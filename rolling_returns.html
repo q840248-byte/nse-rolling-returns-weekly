@@ -839,7 +839,7 @@
         <div class="chart-title-row">
           <div>
             <div class="chart-title">Beta &amp; Alpha vs Nifty 50</div>
-            <div class="chart-subtitle">Beta measures sensitivity to Nifty 50 rolling CAGR moves. Alpha is the excess return after accounting for market exposure. Computed over overlapping rolling CAGR periods in the timeline window.</div>
+            <div class="chart-subtitle">Beta measures sensitivity to Nifty 50 rolling CAGR moves. Alpha is the excess return after accounting for market exposure. Computed over overlapping rolling CAGR periods in the timeline window for the selected indices and the weighted portfolio.</div>
           </div>
           <div class="zero-badge">vs Nifty 50</div>
         </div>
@@ -849,7 +849,7 @@
         <div class="chart-title-row">
           <div>
             <div class="chart-title">Upside / Downside Capture Ratio vs Nifty 50</div>
-            <div class="chart-subtitle">Upside Capture: how much of Nifty 50's positive rolling-CAGR periods the index captured. Downside Capture: how much of Nifty 50's negative periods the index participated in. Values &gt;100% show over-performance; &lt;100% show under-performance in that regime.</div>
+            <div class="chart-subtitle">Upside Capture: how much of Nifty 50's positive rolling-CAGR periods the index or weighted portfolio captured. Downside Capture: how much of Nifty 50's negative periods it participated in. Values &gt;100% show over-performance; &lt;100% show under-performance in that regime.</div>
           </div>
         </div>
         <div id="captureTable" style="overflow-x:auto;margin-top:4px;"></div>
@@ -3681,6 +3681,18 @@ function computeCapture(seriesVals, benchVals) {
   return { upCapture: upCapture, dnCapture: dnCapture, upN: upBench.length, dnN: dnBench.length };
 }
 
+function buildRiskVsNiftyRow(name, color, map, benchDates, benchMap) {
+  var dates = benchDates.filter(function(d){ return map[d] !== undefined; });
+  if (dates.length < 4) return null;
+  var sVals = dates.map(function(d){ return map[d]; });
+  var bVals = dates.map(function(d){ return benchMap[d]; });
+  var ba = computeBetaAlpha(sVals, bVals);
+  var cap = computeCapture(sVals, bVals);
+  var ratio = (cap.upCapture != null && cap.dnCapture != null && Math.abs(cap.dnCapture) > 0.01) ?
+    +(cap.upCapture / cap.dnCapture).toFixed(2) : null;
+  return { name: name, color: color, ba: ba, cap: cap, ratio: ratio, n: dates.length };
+}
+
 function renderBetaAlphaCapture(selKeys, cagrMaps) {
   var betaEl = document.getElementById('betaAlphaTable');
   var captEl = document.getElementById('captureTable');
@@ -3713,16 +3725,19 @@ function renderBetaAlphaCapture(selKeys, cagrMaps) {
     var idx = findSeries(k);
     if (!idx) return;
     var map = cagrMaps[k] || {};
-    var dates = benchDates.filter(function(d){ return map[d] !== undefined; });
-    if (dates.length < 4) return;
-    var sVals = dates.map(function(d){ return map[d]; });
-    var bVals = dates.map(function(d){ return benchMap[d]; });
-    var ba = computeBetaAlpha(sVals, bVals);
-    var cap = computeCapture(sVals, bVals);
-    var ratio = (cap.upCapture != null && cap.dnCapture != null && Math.abs(cap.dnCapture) > 0.01) ?
-      +(cap.upCapture / cap.dnCapture).toFixed(2) : null;
-    rows.push({ name: idx.label, color: idx.color, ba: ba, cap: cap, ratio: ratio, n: dates.length });
+    var row = buildRiskVsNiftyRow(idx.label, idx.color, map, benchDates, benchMap);
+    if (row) rows.push(row);
   });
+
+  if (selKeys.length > 1) {
+    var portfolioMap = {};
+    benchDates.forEach(function(d) {
+      var pv = computePortfolioCagr(d, horizon, selKeys, weights);
+      if (pv !== null) portfolioMap[d] = pv;
+    });
+    var portfolioRow = buildRiskVsNiftyRow('Portfolio', '#f5c842', portfolioMap, benchDates, benchMap);
+    if (portfolioRow) rows.push(portfolioRow);
+  }
 
   if (rows.length === 0) {
     betaEl.innerHTML = '<div class="risk-no-data">No overlapping data with Nifty 50 in the current window</div>';
