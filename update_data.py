@@ -129,12 +129,12 @@ def fetch_data(api_name, from_date, to_date, retries=3):
                 print(f"    API error: {e}")
     return []
 
-def rows_to_month_end_close(rows):
+def rows_to_week_end_close(rows):
     """
-    Convert daily rows to {YYYY-MM: close} dict.
-    Picks the LAST trading day's closing price for each month.
+    Convert daily rows to {YYYY-MM-DD: close} dict.
+    Picks the LAST trading day's closing price for each ISO week.
     """
-    month_best = {}
+    week_best = {}
     for row in rows:
         dt_str = (
             row.get("TIMESTAMP") or
@@ -151,31 +151,32 @@ def rows_to_month_end_close(rows):
             continue
         if close_val <= 0:
             continue
-        key = dt.strftime("%Y-%m")
-        if key not in month_best or dt > month_best[key][0]:
-            month_best[key] = (dt, close_val)
-    return {k: v[1] for k, v in month_best.items()}
+        iso_year, iso_week, _ = dt.isocalendar()
+        key = f"{iso_year}-W{iso_week:02d}"
+        if key not in week_best or dt > week_best[key][0]:
+            week_best[key] = (dt, close_val)
+    return {v[0].strftime("%Y-%m-%d"): v[1] for v in week_best.values()}
 
 def fetch_full_history(api_name, base_date_str, today):
     """
-    Fetch ALL data from base_date to today in 12-month chunks.
-    Returns merged {YYYY-MM: close} dict.
+    Fetch ALL data from base_date to today in 60-month chunks.
+    Returns merged {YYYY-MM-DD: close} dict.
     """
     start = datetime.strptime(base_date_str, "%Y-%m-%d").date().replace(day=1)
-    all_monthly = {}
+    all_weekly = {}
     chunk_start = start
     while chunk_start <= today:
-        chunk_end = min((chunk_start + relativedelta(months=12) - relativedelta(days=1)), today)
+        chunk_end = min((chunk_start + relativedelta(months=60) - relativedelta(days=1)), today)
         rows = fetch_data(api_name, chunk_start, chunk_end)
         if rows:
-            chunk_monthly = rows_to_month_end_close(rows)
-            all_monthly.update(chunk_monthly)
-        time.sleep(1.2)
-        chunk_start = chunk_start + relativedelta(months=12)
-    return all_monthly
+            chunk_weekly = rows_to_week_end_close(rows)
+            all_weekly.update(chunk_weekly)
+        time.sleep(0.25)
+        chunk_start = chunk_start + relativedelta(months=60)
+    return all_weekly
 
-def get_last_month_in_data(data_dict):
-    keys = [k for k in data_dict.keys() if re.match(r"^\d{4}-\d{2}$", k)]
+def get_last_date_in_data(data_dict):
+    keys = [k for k in data_dict.keys() if re.match(r"^\d{4}-\d{2}-\d{2}$", k)]
     return max(keys) if keys else None
 
 def main():
@@ -190,7 +191,7 @@ def main():
     )
 
     today      = date.today()
-    this_month = today.strftime("%Y-%m")
+    today_key  = today.strftime("%Y-%m-%d")
     updated    = 0
     total      = 0
 
@@ -220,7 +221,7 @@ def main():
         if FULL_MODE:
             # Fetch everything from base date in 12-month chunks
             print(f"  [{index_name}] Full fetch from {base_date_str}...", flush=True)
-            new_monthly = fetch_full_history(api_name, base_date_str, today)
+            new_weekly = fetch_full_history(api_name, base_date_str, today)
         else:
             # Fetch only last 6 months
             fetch_from = (today - relativedelta(months=5)).replace(day=1)
@@ -229,27 +230,30 @@ def main():
             time.sleep(0.8)
             rows = fetch_data(api_name, fetch_from, fetch_to)
             if not rows:
-                print("❌ no data returned from API")
+                print("no data returned from API")
                 return m.group(0)
-            new_monthly = rows_to_month_end_close(rows)
+            new_weekly = rows_to_week_end_close(rows)
 
-        if not new_monthly:
-            print("❌ could not parse any rows")
+        if not new_weekly:
+            print("could not parse any rows")
             return m.group(0)
 
+        if FULL_MODE:
+            data = {}
+
         added = 0
-        for k, v in sorted(new_monthly.items()):
-            if k <= this_month:
+        for k, v in sorted(new_weekly.items()):
+            if k <= today_key:
                 if k not in data or data[k] != v:
                     data[k] = v
                     added += 1
 
         if added == 0:
-            print("✓ no changes")
+            print("no changes")
             return m.group(0)
 
-        latest = max(k for k in data if re.match(r'^\d{4}-\d{2}$', k))
-        print(f"✅ updated {added} month(s) → latest: {latest} (close: {data[latest]})")
+        latest = max(k for k in data if re.match(r'^\d{4}-\d{2}-\d{2}$', k))
+        print(f"updated {added} week(s) -> latest: {latest} (close: {data[latest]})")
         updated += 1
 
         new_json = json.dumps(dict(sorted(data.items())), separators=(",", ":"))
@@ -260,7 +264,7 @@ def main():
     with open(HTML_FILE, "w", encoding="utf-8") as f:
         f.write(new_html)
 
-    print(f"\n✅ Done. Updated {updated}/{total} indices.")
+    print(f"\nDone. Updated {updated}/{total} indices.")
     print(f"   Saved: {HTML_FILE}")
 
 if __name__ == "__main__":
